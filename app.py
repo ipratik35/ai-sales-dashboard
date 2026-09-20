@@ -1,23 +1,18 @@
-"""
-AI Sales Analytics Dashboard
-Built with Streamlit | MySQL | Groq API | Plotly
-"""
+import os
+import re
+import sqlite3
+from datetime import datetime
 
-import streamlit as st
+from dotenv import load_dotenv
 from groq import Groq
 import mysql.connector
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
-from dotenv import load_dotenv
-from datetime import datetime
-import os
-import re
+import streamlit as st
 
-import sqlite3
-
-# ── Load Environment Variables & Secrets ─────────────
+# Environment & credentials
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -28,27 +23,26 @@ SQLITE_DB_PATH = os.path.join(os.path.dirname(__file__), "olist_retail.db") if "
 USE_SQLITE = os.path.exists("olist_retail.db") or os.path.exists(SQLITE_DB_PATH)
 
 DB_CONFIG = {
-    'host': os.getenv("DB_HOST", "localhost"),
-    'user': os.getenv("DB_USER", "root"),
-    'password': os.getenv("DB_PASSWORD"),
-    'database': os.getenv("DB_NAME", "olist_retail")
+    "host": os.getenv("DB_HOST", "localhost"),
+    "user": os.getenv("DB_USER", "root"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_NAME", "olist_retail")
 }
 
-# Full schema for AI prompt
 DB_SCHEMA = """
-Database: olist_retail (Brazilian E-Commerce — Real Data)
+Database: olist_retail (Brazilian E-Commerce)
 
 Table: customers
-- customer_id (VARCHAR) — links to orders.customer_id
+- customer_id (VARCHAR) - links to orders.customer_id
 - customer_unique_id (VARCHAR)
 - customer_zip_code_prefix (INT)
 - customer_city (VARCHAR)
-- customer_state (VARCHAR) — 2-letter state code like SP, RJ, MG
+- customer_state (VARCHAR) - 2-letter state code like SP, RJ, MG
 
 Table: orders
-- order_id (VARCHAR) — primary key, links to order_items, order_payments, order_reviews
-- customer_id (VARCHAR) — links to customers.customer_id
-- order_status (VARCHAR) — delivered, shipped, canceled, etc.
+- order_id (VARCHAR) - primary key, links to order_items, order_payments, order_reviews
+- customer_id (VARCHAR) - links to customers.customer_id
+- order_status (VARCHAR) - delivered, shipped, canceled, etc.
 - order_purchase_timestamp (DATETIME)
 - order_approved_at (DATETIME)
 - order_delivered_carrier_date (DATETIME)
@@ -56,33 +50,33 @@ Table: orders
 - order_estimated_delivery_date (DATETIME)
 
 Table: order_items
-- order_id (VARCHAR) — links to orders.order_id
-- order_item_id (INT) — item sequence within order
-- product_id (VARCHAR) — links to products.product_id
-- seller_id (VARCHAR) — links to sellers.seller_id
+- order_id (VARCHAR) - links to orders.order_id
+- order_item_id (INT) - item sequence within order
+- product_id (VARCHAR) - links to products.product_id
+- seller_id (VARCHAR) - links to sellers.seller_id
 - shipping_limit_date (DATETIME)
-- price (FLOAT) — item price
-- freight_value (FLOAT) — shipping cost
+- price (FLOAT) - item price
+- freight_value (FLOAT) - shipping cost
 
 Table: order_payments
-- order_id (VARCHAR) — links to orders.order_id
+- order_id (VARCHAR) - links to orders.order_id
 - payment_sequential (INT)
-- payment_type (VARCHAR) — credit_card, boleto, voucher, debit_card
+- payment_type (VARCHAR) - credit_card, boleto, voucher, debit_card
 - payment_installments (INT)
 - payment_value (FLOAT)
 
 Table: order_reviews
 - review_id (VARCHAR)
-- order_id (VARCHAR) — links to orders.order_id
-- review_score (INT) — 1 to 5
+- order_id (VARCHAR) - links to orders.order_id
+- review_score (INT) - 1 to 5
 - review_comment_title (TEXT)
 - review_comment_message (TEXT)
 - review_creation_date (DATETIME)
 - review_answer_timestamp (DATETIME)
 
 Table: products
-- product_id (VARCHAR) — primary key
-- product_category_name (VARCHAR) — category in Portuguese
+- product_id (VARCHAR) - primary key
+- product_category_name (VARCHAR) - category in Portuguese
 - product_name_lenght (INT)
 - product_description_lenght (INT)
 - product_photos_qty (INT)
@@ -92,64 +86,49 @@ Table: products
 - product_width_cm (INT)
 
 Table: sellers
-- seller_id (VARCHAR) — primary key
+- seller_id (VARCHAR) - primary key
 - seller_zip_code_prefix (INT)
 - seller_city (VARCHAR)
-- seller_state (VARCHAR) — 2-letter state code
+- seller_state (VARCHAR) - 2-letter state code
 
 Table: category_translation
-- product_category_name (VARCHAR) — Portuguese name, links to products.product_category_name
-- product_category_name_english (VARCHAR) — English translation
+- product_category_name (VARCHAR) - Portuguese name, links to products.product_category_name
+- product_category_name_english (VARCHAR) - English translation
 
-IMPORTANT NOTES:
-- The dataset does NOT have a product_name column. In this real-world dataset, Olist anonymized products using 32-character hex product_id hashes.
-- When the user asks for "products" or "top products", NEVER display raw product_id alone. ALWAYS create a human-readable product label:
+Guidelines:
+- Product names in this dataset are anonymized hex hashes. When asked for products, construct a readable label:
   CONCAT(COALESCE(ct.product_category_name_english, 'Product'), ' (', SUBSTRING(p.product_id, 1, 6), ')') AS product_name
-  (joining products with category_translation ON product_category_name).
-- Always join with category_translation to get English category names.
-- Revenue = SUM(price) from order_items (NOT from orders table)
-- To count orders, use COUNT(DISTINCT o.order_id) from orders table
-- To get payment info, JOIN with order_payments ON order_id
-- To get review scores, JOIN with order_reviews ON order_id
-- Dates are in order_purchase_timestamp column in orders table
+  joining products with category_translation ON product_category_name.
+- Join category_translation to obtain English category names.
+- Revenue = SUM(price) from order_items.
+- Order counts use COUNT(DISTINCT o.order_id) from orders.
+- Dates are located in order_purchase_timestamp in orders table.
 """
 
-# ══════════════════════════════════════════════════════
-# DESIGN SYSTEM — Single source of truth
-# ══════════════════════════════════════════════════════
-
-# Global Typography and Contrast Colors
-# Global Typography and Contrast Colors
+# Theme palette
 FONT_FAMILY = "Poppins, -apple-system, BlinkMacSystemFont, sans-serif"
-
-# ── Color System ──────────────────────────────────────
-# Categorical palette: cohesive blues, teals, and soft grays
 CATEGORICAL_COLORS = ["#1F4E79", "#4A90E2", "#8AB4F8", "#C3D7FA", "#E2E8F0"]
-
-# Sequential palette: standardized blue gradient
 BLUE_SCALE = "Blues"
 
 COLORS = {
-    "bg":             "#F7F8FA",   # Page background (soft off-white)
-    "surface":        "#FFFFFF",   # Cards, panels
-    "border":         "#E2E8F0",   # Borders, dividers
-    "text_primary":   "#1E293B",   # Headings, strong emphasis
-    "text_dark":      "#2B2B2B",   # High-contrast solid dark gray for all chart text
-    "text_secondary": "#555555",   # High-contrast secondary text
-    "gridline":       "#E5E5E5",   # Faint light gray gridlines
-    "accent":         "#4A90E2",   # Cohesive mid blue accent
-    "accent_dark":    "#1F4E79",   # Deep navy blue
-    "accent_hover":   "#2563EB",   # Button hover
-    # Semantic delivery performance colors (muted, cohesive)
-    "on_time":        "#4A90E2",   # Calming cohesive blue
-    "late":           "#D97768",   # Soft muted coral (replaces harsh bright red)
-    "not_delivered":  "#CBD5E1",   # Soft neutral gray
+    "bg": "#F7F8FA",
+    "surface": "#FFFFFF",
+    "border": "#E2E8F0",
+    "text_primary": "#1E293B",
+    "text_dark": "#2B2B2B",
+    "text_secondary": "#555555",
+    "gridline": "#E5E5E5",
+    "accent": "#4A90E2",
+    "accent_dark": "#1F4E79",
+    "accent_hover": "#2563EB",
+    "on_time": "#4A90E2",
+    "late": "#D97768",
+    "not_delivered": "#CBD5E1",
 }
 
-# Chart dimensions
 CHART_HEIGHT = 430
 
-# ── Global Plotly Template: custom_theme ──────────────
+# Plotly theme configuration
 custom_theme = pio.templates["simple_white"]
 custom_theme.layout.update(
     colorway=CATEGORICAL_COLORS,
@@ -203,20 +182,18 @@ custom_theme.layout.colorscale.sequential = px.colors.sequential.Blues
 pio.templates["custom_theme"] = custom_theme
 pio.templates.default = "custom_theme"
 
-# ── Page Config ───────────────────────────────────────
+# Application layout
 st.set_page_config(
     page_title="AI Sales Analytics Dashboard",
-    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ── Global CSS ────────────────────────────────────────
+# Custom UI styling
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-    /* ── Typography & Base ────────────────── */
     html, body, [class*="css"], [class*="st-"], .stApp, p, h1, h2, h3, h4, h5, h6, label, input, button, textarea, select, li, div {{
         font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
     }}
@@ -225,7 +202,6 @@ st.markdown(f"""
         color: {COLORS["text_dark"]};
     }}
 
-    /* ── Protect Streamlit Icons from Font Override (Snip 1 Fix) ── */
     [data-testid="stIconMaterial"],
     [data-testid="stSidebarCollapseButton"] button,
     [data-testid="stSidebarCollapseButton"] span,
@@ -236,7 +212,6 @@ st.markdown(f"""
         font-family: 'Material Symbols Rounded', 'Material Symbols Outlined', 'Material Icons' !important;
     }}
 
-    /* ── Hide ONLY Deploy Button and 3-Dots Menu (Snip 2 Fix) ── */
     #MainMenu,
     [data-testid="stMainMenu"],
     .stDeployButton,
@@ -253,7 +228,6 @@ st.markdown(f"""
         display: none !important;
     }}
 
-    /* ── Ensure Sidebar Re-open / Expand Button is ALWAYS Visible & Prominent ── */
     [data-testid="stSidebarCollapsedControl"] {{
         visibility: visible !important;
         display: flex !important;
@@ -280,7 +254,6 @@ st.markdown(f"""
         border-color: #3B82F6 !important;
     }}
 
-    /* ── Sidebar Collapse Button (Inside open sidebar) ── */
     [data-testid="stSidebarCollapseButton"] {{
         visibility: visible !important;
     }}
@@ -291,7 +264,6 @@ st.markdown(f"""
         color: #64748B !important;
     }}
 
-    /* ── Header ───────────────────────────── */
     header[data-testid="stHeader"] {{
         background-color: {COLORS["bg"]};
         border-bottom: 1px solid {COLORS["border"]};
@@ -300,7 +272,6 @@ st.markdown(f"""
         align-items: center !important;
     }}
 
-    /* ── Sidebar Polish ───────────────────── */
     [data-testid="stSidebar"] {{
         background-color: {COLORS["surface"]};
         border-right: 1px solid {COLORS["border"]};
@@ -319,14 +290,12 @@ st.markdown(f"""
         color: {COLORS["text_primary"]} !important;
         font-weight: 600 !important;
     }}
-    /* Hide horizontal scrollbar in sidebar */
     [data-testid="stSidebar"]::-webkit-scrollbar,
     [data-testid="stSidebarUserContent"]::-webkit-scrollbar {{
         width: 4px;
         height: 0px;
     }}
 
-    /* ── Typography ───────────────────────── */
     h1 {{
         color: {COLORS["text_primary"]} !important;
         -webkit-text-fill-color: {COLORS["text_primary"]} !important;
@@ -345,7 +314,6 @@ st.markdown(f"""
         color: {COLORS["text_dark"]};
     }}
 
-    /* ── Metric Cards (Middle Aligned / Centered) ── */
     [data-testid="stMetric"] {{
         background-color: {COLORS["surface"]};
         border: 1px solid {COLORS["border"]};
@@ -398,7 +366,6 @@ st.markdown(f"""
         justify-content: center !important;
     }}
 
-    /* ── Tabs (Solid contrast for both active and inactive) ── */
     .stTabs [data-baseweb="tab-list"] {{
         gap: 4px;
         background-color: #EAEFF5;
@@ -434,7 +401,6 @@ st.markdown(f"""
         opacity: 1 !important;
     }}
 
-    /* ── Input & Buttons ──────────────────── */
     .stTextInput input {{
         background-color: {COLORS["surface"]};
         color: {COLORS["text_primary"]};
@@ -469,7 +435,6 @@ st.markdown(f"""
         color: #FFFFFF !important;
     }}
 
-    /* ── Code Blocks (High Contrast Dark Slate + Bright Crisp White SQL Text) ── */
     [data-testid="stCodeBlock"],
     div[data-testid="stCodeBlock"] pre,
     .stCode,
@@ -490,7 +455,6 @@ st.markdown(f"""
         line-height: 1.6 !important;
         -webkit-text-fill-color: #F8FAFC !important;
     }}
-    /* High contrast keyword styling */
     [data-testid="stCodeBlock"] .hljs-keyword,
     [data-testid="stCodeBlock"] .token.keyword,
     .stCode .hljs-keyword,
@@ -517,24 +481,20 @@ st.markdown(f"""
         color: #94A3B8 !important;
     }}
 
-    /* ── Data Tables ──────────────────────── */
     [data-testid="stDataFrame"] {{
         border-radius: 8px;
         overflow: hidden;
         border: 1px solid {COLORS["border"]};
     }}
 
-    /* ── Dividers ─────────────────────────── */
     hr {{
         border-color: {COLORS["border"]};
     }}
 
-    /* ── Alerts ───────────────────────────── */
     .stAlert {{
         border-radius: 8px;
     }}
 
-    /* ── Captions ─────────────────────────── */
     .stCaption, [data-testid="stCaption"] {{
         color: {COLORS["text_secondary"]} !important;
         font-size: 12px !important;
@@ -542,18 +502,14 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# ── Session State Init ────────────────────────────────
 if "query_history" not in st.session_state:
     st.session_state.query_history = []
 
-# ── Database Helpers ──────────────────────────────────
 def get_connection():
-    """Returns an active database connection (SQLite if file exists, else MySQL)."""
     if USE_SQLITE:
         db_file = SQLITE_DB_PATH if os.path.exists(SQLITE_DB_PATH) else "olist_retail.db"
         conn = sqlite3.connect(db_file, check_same_thread=False)
 
-        # Register MySQL compatibility functions inside SQLite
         def _date_format(val, fmt):
             if not val:
                 return None
@@ -578,34 +534,22 @@ def get_connection():
         return mysql.connector.connect(**DB_CONFIG)
 
 def run_query(query):
-    """Run a SQL query and return a DataFrame."""
     conn = get_connection()
     try:
-        df = pd.read_sql(query, conn)
-        return df
+        return pd.read_sql(query, conn)
     finally:
         conn.close()
 
 def get_single_value(query):
-    """Run a query that returns a single value."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(query)
-        result = cursor.fetchone()[0]
-        return result
+        return cursor.fetchone()[0]
     finally:
         conn.close()
 
-# ── Chart Uniformity Helper ───────────────────────────
 def apply_chart_defaults(fig, hide_colorbar=True):
-    """
-    Enforces the unified design system on every figure:
-    - Transparent backgrounds ('rgba(0,0,0,0)')
-    - Solid dark gray fonts (#2B2B2B) for maximum contrast
-    - Title size: 18px, Axis labels: 14px, Data/Tick labels: 12px
-    - Faint light gray gridlines (#E5E5E5) with no harsh zero-lines
-    """
     layout_updates = dict(
         template="custom_theme",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -620,7 +564,6 @@ def apply_chart_defaults(fig, hide_colorbar=True):
 
     fig.update_layout(**layout_updates)
 
-    # Apply axis standards (if chart has axes)
     fig.update_xaxes(
         title_font=dict(family=FONT_FAMILY, size=14, color=COLORS["text_dark"]),
         tickfont=dict(family=FONT_FAMILY, size=12, color=COLORS["text_dark"]),
@@ -637,28 +580,26 @@ def apply_chart_defaults(fig, hide_colorbar=True):
     )
     return fig
 
-# ── AI Functions ──────────────────────────────────────
 def ask_ai(user_question):
-    """Convert user question to SQL, execute it, return results."""
     client = Groq(api_key=GROQ_API_KEY)
 
     prompt = f"""
     You are an expert SQL analyst.
 
-    I have a MySQL database with the following schema:
+    I have a database with the following schema:
     {DB_SCHEMA}
 
-    The user is asking: {user_question}
+    User request: {user_question}
 
-    Your job:
-    1. Convert this question into a valid MySQL query
-    2. Return ONLY the SQL query — no explanation, no markdown, no backticks
-    3. Only use SELECT statements — never DELETE, UPDATE, DROP
-    4. Always use lowercase column names exactly as shown in schema
-    5. Use proper JOINs when data comes from multiple tables
-    6. For category names, JOIN with category_translation to get English names
-    7. Raw product_id is an unreadable 32-character hash. When asked for products or top products, ALWAYS generate a readable product_name alias using: CONCAT(COALESCE(ct.product_category_name_english, 'Product'), ' (', SUBSTRING(p.product_id, 1, 6), ')') AS product_name
-    8. Limit results to 20 rows max unless user specifies otherwise
+    Rules:
+    1. Output ONLY the raw SQL query without backticks, markdown, or explanations.
+    2. Only SELECT queries are permitted.
+    3. Use lowercase column names exactly as defined in the schema.
+    4. Join tables as necessary to resolve foreign relations.
+    5. For categories, join category_translation to obtain English names.
+    6. Product names are anonymized; format product labels using:
+       CONCAT(COALESCE(ct.product_category_name_english, 'Product'), ' (', SUBSTRING(p.product_id, 1, 6), ')') AS product_name
+    7. Default limit is 20 rows unless specified.
 
     SQL query:
     """
@@ -681,21 +622,18 @@ def ask_ai(user_question):
         conn.close()
 
 def get_ai_insight(user_question, df_result):
-    """Get a one-line business insight from AI about the results."""
     client = Groq(api_key=GROQ_API_KEY)
-
     data_summary = df_result.head(10).to_string(index=False)
 
     prompt = f"""
-    The user asked: {user_question}
+    User query: {user_question}
 
-    Here are the query results:
+    Query output:
     {data_summary}
 
-    Give ONE short business insight (2 sentences max) about this data.
-    Be specific with numbers. Focus on what's actionable.
-    Do NOT start with "Based on the data" or similar.
-    Return ONLY the insight text, nothing else.
+    Provide a concise 1-2 sentence business insight based on this data.
+    Focus on specific metrics and actionable findings.
+    Return only the insight text.
     """
 
     message = client.chat.completions.create(
@@ -706,10 +644,9 @@ def get_ai_insight(user_question, df_result):
     return message.choices[0].message.content.strip()
 
 def pick_chart_type(df, user_question):
-    """Smart chart selection based on data and question."""
     question_lower = user_question.lower()
-    numeric_cols = df.select_dtypes(include='number').columns.tolist()
-    text_cols = df.select_dtypes(include='object').columns.tolist()
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    text_cols = df.select_dtypes(include="object").columns.tolist()
 
     time_keywords = ["trend", "monthly", "daily", "weekly", "over time", "by month", "by year", "growth"]
     if any(kw in question_lower for kw in time_keywords):
@@ -724,11 +661,9 @@ def pick_chart_type(df, user_question):
 
     return "bar"
 
-# ══════════════════════════════════════════════════════
-# SIDEBAR
-# ══════════════════════════════════════════════════════
+# Sidebar controls
 with st.sidebar:
-    st.markdown("<h3 style='text-align: center; margin-bottom: 2px;'>📊 Sales Assistant</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; margin-bottom: 2px;'>Sales Assistant</h3>", unsafe_allow_html=True)
     st.markdown("<p style='font-size: 12.5px; color: #555555; text-align: center; margin-top: -6px; margin-bottom: 14px;'>Executive Analytics & AI Query Engine</p>", unsafe_allow_html=True)
     st.markdown("---")
 
@@ -753,24 +688,15 @@ with st.sidebar:
             unsafe_allow_html=True
         )
 
-# ══════════════════════════════════════════════════════
-# HEADER
-# ══════════════════════════════════════════════════════
+# Main page header
 st.title("AI Sales Analytics Dashboard")
-st.markdown("##### Explore real e-commerce data with pre-built insights + AI-powered queries")
+st.markdown("##### Real e-commerce analytics and natural language query engine")
 st.divider()
 
-# ══════════════════════════════════════════════════════
-# TABS
-# ══════════════════════════════════════════════════════
 tab1, tab2, tab3 = st.tabs(["Business Insights", "AI Assistant", "Query History"])
 
-# ══════════════════════════════════════════════════════
-# TAB 1: BUSINESS INSIGHTS
-# ══════════════════════════════════════════════════════
+# Tab 1: Business Insights
 with tab1:
-
-    # ── KPI Cards ─────────────────────────────────────
     st.markdown("### Key Metrics")
     col1, col2, col3, col4 = st.columns(4)
 
@@ -797,7 +723,6 @@ with tab1:
 
     st.divider()
 
-    # ── Row 1: Revenue Trend + Category Revenue ──────
     st.markdown("### Revenue Analysis")
     left, right = st.columns(2)
 
@@ -844,7 +769,7 @@ with tab1:
             orientation="h"
         )
         fig_cat.update_layout(
-            yaxis={'categoryorder': 'total ascending'},
+            yaxis={"categoryorder": "total ascending"},
             margin=dict(l=180, r=30, t=50, b=50),
         )
         apply_chart_defaults(fig_cat)
@@ -852,7 +777,6 @@ with tab1:
 
     st.divider()
 
-    # ── Row 2: Top States + Payment Methods ──────────
     st.markdown("### Customer & Payment Analysis")
     left2, right2 = st.columns(2)
 
@@ -870,7 +794,6 @@ with tab1:
             LIMIT 10
         """)
 
-        # Format revenue to match the 5M y-axis scale
         df_states["revenue_fmt"] = df_states["revenue"].apply(
             lambda x: f"R$ {x/1_000_000:.1f}M" if x >= 1_000_000 else f"R$ {x/1_000:.0f}K"
         )
@@ -884,14 +807,14 @@ with tab1:
             custom_data=["total_orders", "revenue"]
         )
         fig_states.update_traces(
-            textposition='outside',
+            textposition="outside",
             textfont=dict(family=FONT_FAMILY, size=12, color=COLORS["text_dark"]),
             hovertemplate="<b>State:</b> %{x}<br><b>Revenue:</b> R$ %{customdata[1]:,.2f}<br><b>Total Orders:</b> %{customdata[0]:,}<extra></extra>"
         )
         fig_states.update_layout(
             xaxis_title="State",
             yaxis_title="Revenue (R$)",
-            yaxis=dict(range=[0, df_states["revenue"].max() * 1.15])  # Leave headroom for labels
+            yaxis=dict(range=[0, df_states["revenue"].max() * 1.15])
         )
         apply_chart_defaults(fig_states)
         st.plotly_chart(fig_states, use_container_width=True)
@@ -924,7 +847,6 @@ with tab1:
 
     st.divider()
 
-    # ── Row 3: Review Scores + Delivery Performance ──
     st.markdown("### Delivery & Review Analysis")
     left3, right3 = st.columns(2)
 
@@ -970,9 +892,9 @@ with tab1:
             title="Delivery Performance",
             color="delivery_status",
             color_discrete_map={
-                "On Time": COLORS["on_time"],             # Calm cohesive blue (#4A90E2)
-                "Late": COLORS["late"],                   # Soft muted coral (#D97768)
-                "Not Delivered": COLORS["not_delivered"], # Soft neutral gray (#CBD5E1)
+                "On Time": COLORS["on_time"],
+                "Late": COLORS["late"],
+                "Not Delivered": COLORS["not_delivered"],
             },
         )
         fig_del.update_traces(
@@ -982,7 +904,6 @@ with tab1:
         apply_chart_defaults(fig_del, hide_colorbar=False)
         st.plotly_chart(fig_del, use_container_width=True)
 
-    # ── Insight: Late Delivery vs Review Score ────────
     st.markdown("### Key Insight: Late Deliveries Impact on Reviews")
     df_insight = run_query("""
         SELECT
@@ -1017,12 +938,10 @@ with tab1:
                     f"{row['total_orders']:,} orders"
                 )
 
-# ══════════════════════════════════════════════════════
-# TAB 2: AI ASSISTANT
-# ══════════════════════════════════════════════════════
+# Tab 2: AI Assistant
 with tab2:
-    st.markdown("### Ask Any Question About the Data")
-    st.markdown("Type your question in plain English — AI will write the SQL, run it, and show results.")
+    st.markdown("### Natural Language Query Assistant")
+    st.markdown("Enter a business question in plain English to generate SQL, execute it against the warehouse, and visualize the output.")
 
     user_question = st.text_input(
         "",
@@ -1030,45 +949,41 @@ with tab2:
         key="ai_question"
     )
 
-    if st.button("Ask AI", key="ask_btn"):
+    if st.button("Generate Query", key="ask_btn"):
         if user_question:
-            with st.spinner("AI is generating your query..."):
+            with st.spinner("Compiling SQL query..."):
                 df_result, sql_query, error = ask_ai(user_question)
 
-            st.markdown("**Generated SQL:**")
+            st.markdown("**Generated SQL Query:**")
             st.code(sql_query, language="sql")
 
             if error:
-                st.error(f"Query Error: {error}")
+                st.error(f"Query Execution Error: {error}")
             elif df_result is not None and len(df_result) > 0:
 
-                # AI insight
-                with st.spinner("Generating insight..."):
+                with st.spinner("Analyzing output..."):
                     try:
                         insight = get_ai_insight(user_question, df_result)
-                        st.info(f"**Insight:** {insight}")
+                        st.info(f"**Executive Insight:** {insight}")
                     except Exception:
                         pass
 
-                # Results table
-                st.markdown("**Results:**")
+                st.markdown("**Query Results:**")
                 st.dataframe(df_result, use_container_width=True)
                 st.caption(f"{len(df_result)} rows returned")
 
-                # Smart product label synthesis if both product_id and category exist
-                cat_col = next((c for c in ['category', 'product_category_name_english', 'product_category_name'] if c in df_result.columns), None)
-                if 'product_id' in df_result.columns and cat_col:
-                    df_result['product'] = df_result[cat_col].fillna('Item').astype(str) + ' (#' + df_result['product_id'].astype(str).str[:6] + ')'
+                cat_col = next((c for c in ["category", "product_category_name_english", "product_category_name"] if c in df_result.columns), None)
+                if "product_id" in df_result.columns and cat_col:
+                    df_result["product"] = df_result[cat_col].fillna("Item").astype(str) + " (#" + df_result["product_id"].astype(str).str[:6] + ")"
 
-                # Smart chart column detection
-                numeric_cols = df_result.select_dtypes(include='number').columns.tolist()
-                text_cols = df_result.select_dtypes(include='object').columns.tolist()
-                date_cols = df_result.select_dtypes(include='datetime').columns.tolist()
+                numeric_cols = df_result.select_dtypes(include="number").columns.tolist()
+                text_cols = df_result.select_dtypes(include="object").columns.tolist()
+                date_cols = df_result.select_dtypes(include="datetime").columns.tolist()
 
                 if not date_cols and text_cols:
                     for col in list(text_cols):
                         sample = str(df_result[col].iloc[0]) if len(df_result) > 0 else ""
-                        if re.match(r'\d{4}-\d{2}', sample):
+                        if re.match(r"\d{4}-\d{2}", sample):
                             date_cols.append(col)
                             text_cols.remove(col)
                             break
@@ -1076,24 +991,22 @@ with tab2:
                 if numeric_cols and (text_cols or date_cols):
                     chart_type = pick_chart_type(df_result, user_question)
 
-                    # Prioritize human-friendly descriptive columns over raw hex IDs
-                    id_pattern = re.compile(r'(_id|uuid|hash|^id$)', re.IGNORECASE)
+                    id_pattern = re.compile(r"(_id|uuid|hash|^id$)", re.IGNORECASE)
                     descriptive_text_cols = [c for c in text_cols if not id_pattern.search(c)]
 
                     if date_cols:
                         x_col = date_cols[0]
-                    elif 'product' in df_result.columns:
-                        x_col = 'product'
-                    elif 'product_name' in df_result.columns:
-                        x_col = 'product_name'
+                    elif "product" in df_result.columns:
+                        x_col = "product"
+                    elif "product_name" in df_result.columns:
+                        x_col = "product_name"
                     elif descriptive_text_cols:
                         x_col = descriptive_text_cols[0]
                     else:
                         x_col = text_cols[0]
-                        # Shorten unreadable 32-char hashes if only raw ID exists
                         if df_result[x_col].astype(str).str.len().max() > 12:
-                            short_col = x_col + '_short'
-                            df_result[short_col] = '#' + df_result[x_col].astype(str).str[:8]
+                            short_col = x_col + "_short"
+                            df_result[short_col] = "#" + df_result[x_col].astype(str).str[:8]
                             x_col = short_col
 
                     y_col = numeric_cols[0]
@@ -1128,7 +1041,6 @@ with tab2:
                     apply_chart_defaults(fig)
                     st.plotly_chart(fig, use_container_width=True)
 
-                # Save to history
                 st.session_state.query_history.append({
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "question": user_question,
@@ -1138,7 +1050,7 @@ with tab2:
                 })
 
             elif df_result is not None and len(df_result) == 0:
-                st.warning("Query ran successfully but returned no results.")
+                st.warning("Query returned zero rows.")
                 st.session_state.query_history.append({
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "question": user_question,
@@ -1147,30 +1059,28 @@ with tab2:
                     "status": "No Results"
                 })
         else:
-            st.warning("Please type a question first.")
+            st.warning("Please specify a business question.")
 
-# ══════════════════════════════════════════════════════
-# TAB 3: QUERY HISTORY
-# ══════════════════════════════════════════════════════
+# Tab 3: Query History
 with tab3:
-    st.markdown("### Query History")
-    st.markdown("All questions asked during this session.")
+    st.markdown("### Session Query Log")
+    st.markdown("Audit trail of all SQL queries executed during this active session.")
 
     if st.session_state.query_history:
         df_history = pd.DataFrame(st.session_state.query_history)
         st.dataframe(df_history, use_container_width=True)
 
-        if st.button("Clear History"):
+        if st.button("Clear Log"):
             st.session_state.query_history = []
             st.rerun()
     else:
-        st.info("No queries yet. Go to the AI Assistant tab and ask a question.")
+        st.info("No queries executed in the current session.")
 
-# ── Footer ────────────────────────────────────────────
+# Footer
 st.divider()
 st.markdown(
     f"<center style='color: {COLORS['text_secondary']}; font-size: 12px;'>"
-    "Built with Python · MySQL · Groq API · Streamlit · Plotly"
+    "Python · SQL · Groq API · Streamlit · Plotly"
     "</center>",
     unsafe_allow_html=True
 )
