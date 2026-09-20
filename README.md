@@ -1,43 +1,84 @@
-# AI Sales Analytics Dashboard
+# AI Sales Analytics Assistant
 
-An executive e-commerce analytics dashboard powered by **Streamlit**, **Plotly**, and **Groq LLM** (Natural Language to SQL). Built on real-world transaction data from the **Olist Brazilian E-Commerce dataset** (100k+ orders, 9 tables).
+An enterprise analytics platform that translates plain English business questions into relational SQL queries, executes them against an e-commerce data warehouse, and returns interactive charts with automated executive insights.
+
+Built on the real-world Olist Brazilian E-Commerce dataset (100,000+ orders across 8 relational tables).
+
+---
+
+## Problem
+
+Business and operations teams routinely depend on data analysts for standard reporting: identifying top sales regions, tracking monthly trends, or reviewing customer retention. This creates an operational bottleneck where analysts spend hours answering repetitive questions instead of focusing on strategic modeling. Non-technical stakeholders lack SQL knowledge to self-serve, while static BI dashboards cannot anticipate every ad-hoc business question.
+
+---
+
+## Solution
+
+The AI Sales Analytics Assistant enables non-technical stakeholders to converse directly with an enterprise relational database using natural language.
+
+Powered by Groq's 120B model and an embedded data architecture (SQLite / MySQL), the platform:
+1. Translates natural language questions into optimized multi-table SQL queries in real time.
+2. Automatically determines the best visualization format (time-series line, categorical bar, or distribution pie).
+3. Synthesizes concise, actionable business takeaways from the resulting data.
+4. Provides an executive KPI dashboard tracking Revenue, Volume, Review Scores, and Repeat Customers.
+
+---
+
+## How I Approached It
+
+- **Data Modeling & Architecture**: Ingested and indexed the real-world Olist dataset (100,000+ orders across 8 relational tables). Structured an embedded, indexed SQLite warehouse (with full MySQL compatibility) to achieve sub-0.25s join speeds with zero cloud hosting costs.
+- **Prompt Engineering & Schema Context**: Designed a metadata prompt layer passing schema constraints, table relationships, and business rules to Groq's 120B model to generate deterministic, executable SQL without conversational preamble.
+- **Autonomous Visualization**: Built a rule-based inference engine that inspects query result datatypes and temporal keywords to dynamically select the ideal Plotly chart type.
+- **Executive Summaries**: Configured an automated analytical layer that evaluates query results to produce two-sentence business takeaways highlighting key trends and anomalies.
+
+---
+
+## Key Upgrades Over Version 1
+
+| Capability | Version 1.0 | Version 2.0 (Current) |
+|---|---|---|
+| Data Architecture | Single flat table (Superstore, synthetic data) | 8-table normalized relational warehouse (Olist, real-world data) |
+| Query Complexity | Single-table SELECT and WHERE statements | Multi-table relational JOINs resolving foreign key relationships |
+| Data Sanitization | Basic English column names | Dynamic SKU resolution for 32-character anonymized product hashes; translation of Portuguese categories |
+| Customer Intelligence | Total customer ID counts | Differentiates transactional IDs from unique individuals to track repeat buyers |
+| Visualization Engine | Static bar charts only | Automated chart type inference based on data shape and temporal keywords |
+| Analytical Output | Raw table and chart | SQL execution, dynamic visualization, and automated executive insights |
+| Interface Design | Basic dark mode theme | Unified corporate design system with custom Plotly templates and high-contrast typography |
+| Deployment | Local MySQL only | Embedded, indexed database architecture deployed online at zero hosting cost |
 
 ---
 
 ## Key Features
 
-* **Executive KPI Suite**: Total Revenue, Total Orders, Average Review Score, and Unique Customers with repeat-purchase tracking.
-* **Interactive Visualizations**:
-  * Monthly Revenue Trends
-  * Top 10 Product Categories by Revenue
-  * Top 10 States by Revenue (with dual-metric hover tooltips)
-  * Payment Method Value Distribution
-  * Review Score Distribution (1–5 stars)
-  * Delivery Performance & Late Delivery Impact on Customer Satisfaction
-* **AI-Powered Sales Assistant**:
-  * Plain English questions converted into optimized SQL queries in real-time using Groq API.
-  * Automatic smart chart selection (line trends, category bars, distribution pies).
-  * Automated 2-sentence executive business insights generated for every query.
-* **Unified Design System**: Minimalist light theme with custom Plotly template (`#F7F8FA` background, high-contrast dark gray typography, restrained blue gradients, and muted semantic accents).
-* **Session Query History**: Logs all AI-generated questions, SQL code, and row counts.
+- **Natural Language to SQL**: Converts plain English business questions into multi-table SQL queries in seconds.
+- **Relational Joins**: Traverses orders, order items, products, customers, sellers, payments, reviews, and category translations.
+- **Dynamic Charts**: Automatically renders Line, Bar, or Pie charts using Plotly Express.
+- **Executive Metric Suite**: Live KPI cards tracking Total Revenue (R$ 13.6M), Orders (99.4k), Average Review (4.1 / 5), and Unique Customers (96.1k).
+- **Delivery Performance Analysis**: Quantifies how delivery delays correlate directly with lower review ratings.
+- **Query Audit Log**: Retains a session history of all executed questions, generated SQL queries, and record counts.
 
 ---
 
-##  Tech Stack
+## Sample Business Questions
 
-* **Frontend / UI**: [Streamlit](https://streamlit.io/)
-* **Charts & Plots**: [Plotly Express](https://plotly.com/python/)
-* **AI / NLP**: [Groq API](https://groq.com/) (`openai/gpt-oss-120b`)
-* **Database**: SQLite (embedded for instant cloud deployment) / MySQL
-* **Data Manipulation**: [Pandas](https://pandas.pydata.org/)
+- Top 10 product categories by total revenue?
+- Monthly sales trend for delivered orders?
+- Which states generate the highest revenue?
+- What is the breakdown of customer payment methods?
+- Average review score by product category?
+- Top 5 sellers by total revenue?
+- How many orders were canceled?
+- Late delivery rate by state?
 
 ---
 
-## Dataset
+## Tech Stack
 
-* **Source**: Olist Brazilian E-Commerce Public Dataset
-* **Size**: 100,000+ orders across 8 relational tables
-* **Note**: Product names in Olist were anonymized with 32-character hashes; this dashboard programmatically synthesizes readable composite SKU labels (e.g., `garden_tools (#422879)`).
+- **Frontend**: Streamlit
+- **Visualization**: Plotly Express
+- **Language Model**: Groq API (`openai/gpt-oss-120b`)
+- **Data Engine**: SQLite, MySQL, Pandas
+- **Environment**: Python 3.11+
 
 ---
 
@@ -45,7 +86,7 @@ An executive e-commerce analytics dashboard powered by **Streamlit**, **Plotly**
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/ai-sales-dashboard.git
+   git clone https://github.com/ipratik35/ai-sales-dashboard.git
    cd ai-sales-dashboard
    ```
 
@@ -55,12 +96,12 @@ An executive e-commerce analytics dashboard powered by **Streamlit**, **Plotly**
    ```
 
 3. **Configure Environment Variables**:
-   Create a `.env` file in the root directory:
+   Create a `.env` file in the project root:
    ```env
    GROQ_API_KEY=your_groq_api_key_here
    ```
 
-4. **Run the application**:
+4. **Launch the application**:
    ```bash
    streamlit run app.py
    ```
