@@ -1,10 +1,10 @@
-# 📊 AI Sales Analytics Dashboard
+# AI Sales Analytics Dashboard
 
 An executive e-commerce analytics dashboard powered by **Streamlit**, **Plotly**, and **Groq LLM** (Natural Language to SQL). Built on real-world transaction data from the **Olist Brazilian E-Commerce dataset** (100k+ orders, 9 tables).
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 * **Executive KPI Suite**: Total Revenue, Total Orders, Average Review Score, and Unique Customers with repeat-purchase tracking.
 * **Interactive Visualizations**:
@@ -23,7 +23,7 @@ An executive e-commerce analytics dashboard powered by **Streamlit**, **Plotly**
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 * **Frontend / UI**: [Streamlit](https://streamlit.io/)
 * **Charts & Plots**: [Plotly Express](https://plotly.com/python/)
@@ -33,7 +33,7 @@ An executive e-commerce analytics dashboard powered by **Streamlit**, **Plotly**
 
 ---
 
-## 📁 Dataset
+## Dataset
 
 * **Source**: Olist Brazilian E-Commerce Public Dataset
 * **Size**: 100,000+ orders across 8 relational tables
@@ -41,7 +41,7 @@ An executive e-commerce analytics dashboard powered by **Streamlit**, **Plotly**
 
 ---
 
-## 💻 Local Setup
+## Local Setup
 
 1. **Clone the repository**:
    ```bash
